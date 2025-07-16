@@ -298,4 +298,4 @@ kubectl get application authentik -n argocd
 
 # Access Authentik
 open https://authentik.srespace.tech
-```
+```# Trigger build
