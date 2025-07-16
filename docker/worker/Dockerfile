@@ -1,11 +1,9 @@
-# docker/worker/Dockerfile
 FROM python:3.11-slim
 
 WORKDIR /worker
+COPY . /worker
 
-# Install Celery without any fake authentik dependency
+# Example dependency: celery (already available)
 RUN pip install celery
 
-COPY . .
-
-CMD ["celery", "-A", "main", "worker", "--loglevel=info"]
+CMD ["celery", "-A", "worker.tasks", "worker", "--loglevel=info"]
