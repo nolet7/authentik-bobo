@@ -1,12 +1,9 @@
-# docker/server/Dockerfile
 FROM python:3.11-slim
 
 WORKDIR /app
+COPY . /app
 
-# Optional: install gunicorn for production server
+# Only install dependencies available on PyPI
 RUN pip install gunicorn
 
-# Copy your actual application here
-COPY . .
-
-CMD ["gunicorn", "main:app", "--bind", "0.0.0.0:9000"]
+CMD ["gunicorn", "--bind", "0.0.0.0:9000", "app:app"]
