@@ -2,11 +2,12 @@ name: Build and Deploy Authentik with ArgoCD
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, sre ]
     paths: 
       - 'helm/**'
       - 'docker-compose.yml'
       - 'nginx/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 env:
@@ -58,13 +59,32 @@ jobs:
         
         # Set Vault address from environment and authenticate
         export VAULT_ADDR=${{ env.VAULT_ADDR }}
-        vault auth -method=token token=${{ secrets.VAULT_TOKEN }}
         
-        # Create path if it doesn't exist
-        vault kv put ${{ env.VAULT_PATH }} temp=temp 2>/dev/null || true
+        # Authenticate with Vault
+        export VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
+        vault auth -method=token token=$VAULT_TOKEN
         
-        # Import secrets and export as environment variables
-        vault kv get -format=json ${{ env.VAULT_PATH }} | jq -r '.data.data | to_entries[] | "export \(.key | ascii_upcase)=\(.value)"' > vault_secrets.env
+        # Verify authentication worked
+        vault token lookup
+        
+        # Check if KV v2 engine is enabled at secret/
+        vault secrets list | grep -q "secret/" || vault secrets enable -path=secret kv-v2
+        
+        # Try to get secrets, if path doesn't exist, create it with default values
+        if ! vault kv get ${{ env.VAULT_PATH }} > /dev/null 2>&1; then
+          echo "Creating Vault path with default values..."
+          vault kv put ${{ env.VAULT_PATH }} \
+            AUTHENTIK_SECRET_KEY="change-me-in-production" \
+            PG_PASS="authentik" \
+            SMTP_HOST="smtp.gmail.com" \
+            SMTP_PORT="587" \
+            SMTP_USER="user@example.com" \
+            SMTP_PASS="password" \
+            DOMAIN_NAME="auth.yourdomain.com"
+        fi
+        
+        # Get secrets and export as environment variables
+        vault kv get -format=json ${{ env.VAULT_PATH }} | jq -r '.data.data | to_entries[] | "export \(.key)=\(.value)"' > vault_secrets.env
         source vault_secrets.env
         
         # Set GitHub environment variables
@@ -210,3 +230,4 @@ jobs:
         kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=authentik -n authentik --timeout=300s || true
         
         echo "Deployment completed successfully!"
+

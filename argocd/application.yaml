@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/nolet7/authentik-bobo.git
-    targetRevision: HEAD
+    targetRevision: main
     path: helm/authentik-chart
     helm:
       valueFiles:
