@@ -5,8 +5,7 @@ on:
     branches: [ main, develop ]
     paths: 
       - 'authentik/**'
-  workflow_dispatch:
-
+  workflow_dispatch:elop 
 env:
   VAULT_ADDR: http://192.168.0.116:8200
   VAULT_PATH: secret/Dev-secret/authentik
@@ -42,9 +41,16 @@ jobs:
       run: |
         # Install vault CLI if not present
         if ! command -v vault &> /dev/null; then
-          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-          sudo apt update && sudo apt install vault
+          # Download and install Vault binary directly
+          VAULT_VERSION="1.15.2"
+          wget -O vault.zip "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip"
+          unzip vault.zip
+          sudo mv vault /usr/local/bin/
+          sudo chmod +x /usr/local/bin/vault
+          rm vault.zip
+          
+          # Verify installation
+          vault version
         fi
         
         # Set Vault address from environment and authenticate
@@ -154,7 +160,7 @@ jobs:
 
     - name: Update Helm values with new image tag
       run: |
-        cd authentik/helm/authentik-chart
+        cd helm/authentik-chart
         
         # Extract tag
         TAG=${{ needs.build-and-push.outputs.tag }}

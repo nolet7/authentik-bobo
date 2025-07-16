@@ -8,8 +8,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/nolet7/devops-test.git
-    targetRevision: HEAD
+    repoURL: https://github.com/nolet7/authentik-bobo.git
+    targetRevision: develop
     path: authentik/helm/authentik-chart
     helm:
       releaseName: authentik
@@ -34,3 +34,4 @@ spec:
         factor: 2
         maxDuration: 3m
   revisionHistoryLimit: 10
+
