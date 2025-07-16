@@ -4,7 +4,9 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'authentik/**'
+      - 'helm/**'
+      - 'argocd/**'
+      - 'docker-compose.yml'
   workflow_dispatch:
 
 env:
@@ -160,7 +162,7 @@ jobs:
 
       - name: Apply ArgoCD Application
         run: |
-          kubectl apply -f authentik/argocd/application.yaml
+          kubectl apply -f argocd/application.yaml
           echo "Waiting for ArgoCD to sync the application..."
           sleep 30
 
