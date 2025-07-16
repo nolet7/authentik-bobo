@@ -1,4 +1,4 @@
-name: Build and Deploy Authentik with ArgoCD
+name: Build and Deploy Authentik
 
 on:
   push:
@@ -12,25 +12,47 @@ on:
 
 env:
   VAULT_ADDR: http://192.168.0.116:8200
-  VAULT_PATH: secret/Dev-secret/authentik
   DOCKER_USER: noletengine
   REGISTRY: docker.io
   IMAGE_NAME_PREFIX: noletengine/authentik
 
 jobs:
-  build-and-push:
+  build-authentik:
     runs-on: self-hosted
     permissions:
-      contents: read
+      contents: write
       packages: write
 
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
-
     steps:
-    - name: Checkout code
+    - name: Checkout repo
       uses: actions/checkout@v4
+
+    - name: Install Vault CLI
+      run: |
+        if ! command -v vault &> /dev/null; then
+          sudo curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt update && sudo apt-get install vault -y
+        fi
+
+    - name: Authenticate to Vault
+      run: vault login ${{ secrets.VAULT_TOKEN }}
+      env:
+        VAULT_ADDR: http://192.168.0.116:8200
+
+    - name: Pull secrets from Vault
+      run: |
+        echo "AUTHENTIK_SECRET_KEY=$(vault kv get -field=AUTHENTIK_SECRET_KEY secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "POSTGRES_USER=$(vault kv get -field=POSTGRES_USER secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "POSTGRES_PASSWORD=$(vault kv get -field=PG_PASS secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "DATABASE_URL=$(vault kv get -field=DATABASE_URL secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_HOST=$(vault kv get -field=SMTP_HOST secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_PORT=$(vault kv get -field=SMTP_PORT secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_USER=$(vault kv get -field=SMTP_USER secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_PASS=$(vault kv get -field=SMTP_PASS secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_USE_TLS=$(vault kv get -field=SMTP_USE_TLS secret/Dev-secret/authentik)" >> $GITHUB_ENV
+      env:
+        VAULT_ADDR: http://192.168.0.116:8200
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -41,65 +63,6 @@ jobs:
         username: ${{ env.DOCKER_USER }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Import secrets from Vault
-      run: |
-        # Install vault CLI if not present
-        if ! command -v vault &> /dev/null; then
-          # Download and install Vault binary directly
-          VAULT_VERSION="1.15.2"
-          wget -O vault.zip "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip"
-          unzip vault.zip
-          sudo mv vault /usr/local/bin/
-          sudo chmod +x /usr/local/bin/vault
-          rm vault.zip
-          
-          # Verify installation
-          vault version
-        fi
-        
-        # Set Vault address from environment and authenticate
-        export VAULT_ADDR=${{ env.VAULT_ADDR }}
-        
-        # Debug: Check token format
-        echo "Token length: ${#VAULT_TOKEN}"
-        echo "Token prefix: ${VAULT_TOKEN:0:4}"
-        
-        # Authenticate with Vault
-        export VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
-        vault auth -method=token token=$VAULT_TOKEN
-        
-        # Verify authentication worked
-        vault token lookup
-        
-        # Check if KV v2 engine is enabled at secret/
-        vault secrets list | grep -q "secret/" || vault secrets enable -path=secret kv-v2
-        
-        # Try to get secrets, if path doesn't exist, create it with default values
-        if ! vault kv get ${{ env.VAULT_PATH }} > /dev/null 2>&1; then
-          echo "Creating Vault path with default values..."
-          vault kv put ${{ env.VAULT_PATH }} \
-            AUTHENTIK_SECRET_KEY="change-me-in-production" \
-            PG_PASS="authentik" \
-            SMTP_HOST="smtp.gmail.com" \
-            SMTP_PORT="587" \
-            SMTP_USER="user@example.com" \
-            SMTP_PASS="password" \
-            DOMAIN_NAME="auth.yourdomain.com"
-        fi
-        
-        # Get secrets and export as environment variables
-        vault kv get -format=json ${{ env.VAULT_PATH }} | jq -r '.data.data | to_entries[] | "export \(.key)=\(.value)"' > vault_secrets.env
-        source vault_secrets.env
-        
-        # Set GitHub environment variables
-        echo "POSTGRES_PASSWORD=$PG_PASS" >> $GITHUB_ENV
-        echo "AUTHENTIK_SECRET_KEY=$AUTHENTIK_SECRET_KEY" >> $GITHUB_ENV
-        echo "SMTP_HOST=$SMTP_HOST" >> $GITHUB_ENV
-        echo "SMTP_PORT=$SMTP_PORT" >> $GITHUB_ENV
-        echo "SMTP_USER=$SMTP_USER" >> $GITHUB_ENV
-        echo "SMTP_PASS=$SMTP_PASS" >> $GITHUB_ENV
-        echo "DOMAIN_NAME=$DOMAIN_NAME" >> $GITHUB_ENV
-
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -107,53 +70,56 @@ jobs:
         images: |
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-redis
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-nginx
         tags: |
           type=ref,event=branch
-          type=ref,event=pr
           type=sha,prefix={{branch}}-
           type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push images
-      id: build
       run: |
-        # Create .env file with Vault secrets
+        # Create .env file with secrets
         cat > .env << EOF
         AUTHENTIK_SECRET_KEY=${{ env.AUTHENTIK_SECRET_KEY }}
         POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
+        POSTGRES_USER=${{ env.POSTGRES_USER }}
         SMTP_HOST=${{ env.SMTP_HOST }}
         SMTP_PORT=${{ env.SMTP_PORT }}
         SMTP_USER=${{ env.SMTP_USER }}
         SMTP_PASS=${{ env.SMTP_PASS }}
-        DOMAIN_NAME=${{ env.DOMAIN_NAME }}
+        DOMAIN_NAME=auth.yourdomain.com
+        HOST_IP=192.168.0.2
         EOF
         
-        # Extract tag from metadata
-        TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1 | cut -d: -f2)
+        # Extract branch and commit for tagging
+        BRANCH=${GITHUB_REF#refs/heads/}
+        COMMIT=${GITHUB_SHA:0:7}
+        TAG="${BRANCH}-${COMMIT}"
+        
         echo "Building with tag: $TAG"
         
-        # Build and start containers
+        # Start containers
         docker-compose up -d
-        
-        # Wait for containers to be ready
         sleep 30
         
-        # Commit and tag images
+        # Tag and push images
         docker commit authentik_server ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:$TAG
         docker commit authentik_worker ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:$TAG
         docker commit authentik_postgresql ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:$TAG
         docker commit authentik_redis ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-redis:$TAG
         docker commit authentik_nginx ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-nginx:$TAG
         
-        # Push images
+        # Push all images
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-redis:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-nginx:$TAG
         
-        # Tag as latest if main branch
-        if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+        # Tag as latest for main branch
+        if [ "$BRANCH" = "main" ]; then
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:$TAG ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:latest
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:$TAG ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:latest
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:$TAG ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:latest
@@ -170,107 +136,50 @@ jobs:
         # Cleanup
         docker-compose down
         
-        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        # Output tag for next job
+        echo "IMAGE_TAG=$TAG" >> $GITHUB_OUTPUT
+      id: build
 
-  update-helm-values:
-    needs: build-and-push
-    runs-on: self-hosted
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0
-
-    - name: Update Helm values with new image tag
+    - name: Update Helm values
       run: |
         cd helm/authentik-chart
+        TAG="${{ steps.build.outputs.IMAGE_TAG }}"
         
-        # Extract tag
-        TAG=${{ needs.build-and-push.outputs.tag }}
+        # Update all image tags in values.yaml
+        sed -i "s/tag: \".*\"/tag: \"$TAG\"/" values.yaml
         
-        # Update values.yaml with new image tag
-        sed -i "s/tag: .*/tag: \"$TAG\"/" values.yaml
-        
-        # Commit changes
+        # Commit and push changes
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add values.yaml
-        git commit -m "Update image tag to $TAG" || exit 0
+        git commit -m "Update image tags to $TAG [skip ci]" || exit 0
         git push
 
-  deploy-with-argocd:
-    needs: [build-and-push, update-helm-values]
-    runs-on: self-hosted
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0
-
-    - name: Apply ArgoCD Application
+    - name: Deploy with ArgoCD
       run: |
-        # Determine which ArgoCD application to deploy based on branch
-        case "${{ github.ref }}" in
-          "refs/heads/main")
-            echo "Deploying to production environment"
-            kubectl apply -f argocd/application-production.yaml
-            APP_NAME="authentik-production"
-            ;;
-          "refs/heads/develop")
-            echo "Deploying to staging environment"
-            kubectl apply -f argocd/application-staging.yaml
-            APP_NAME="authentik-staging"
-            ;;
-          "refs/heads/sre")
-            echo "Deploying to SRE environment"
-            kubectl apply -f argocd/application-sre.yaml
-            APP_NAME="authentik-sre"
-            ;;
-          *)
-            echo "Unknown branch, skipping deployment"
-            exit 0
-            ;;
-        esac
+        BRANCH=${GITHUB_REF#refs/heads/}
         
-        # Wait for ArgoCD to sync the application
-        echo "Waiting for ArgoCD to sync the application..."
-        sleep 30
-
-    - name: Verify deployment
-      run: |
-        # Determine application name based on branch
-        case "${{ github.ref }}" in
-          "refs/heads/main")
+        case "$BRANCH" in
+          "main")
+            kubectl apply -f argocd/application-production.yaml
             APP_NAME="authentik-production"
             NAMESPACE="authentik-production"
             ;;
-          "refs/heads/develop")
+          "develop")
+            kubectl apply -f argocd/application-staging.yaml
             APP_NAME="authentik-staging"
             NAMESPACE="authentik-staging"
             ;;
-          "refs/heads/sre")
+          "sre")
+            kubectl apply -f argocd/application-sre.yaml
             APP_NAME="authentik-sre"
             NAMESPACE="authentik-sre"
             ;;
-          *)
-            echo "Unknown branch, skipping verification"
-            exit 0
-            ;;
         esac
         
-        # Check ArgoCD application status
-        kubectl get application $APP_NAME -n argocd -o yaml
+        echo "Deployed $APP_NAME to $NAMESPACE"
         
-        # Check Kubernetes resources
-        kubectl get pods -n $NAMESPACE
-        kubectl get services -n $NAMESPACE
-        kubectl get ingress -n $NAMESPACE
-        
-        # Health check
-        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=authentik-chart -n $NAMESPACE --timeout=300s || true
-        
-
+        # Wait and verify
+        sleep 30
+        kubectl get application $APP_NAME -n argocd || true
+        kubectl get pods -n $NAMESPACE || true
