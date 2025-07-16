@@ -1,5 +1,12 @@
+# docker/server/Dockerfile
 FROM python:3.11-slim
+
 WORKDIR /app
-COPY . /app
-RUN pip install -r requirements.txt
-CMD ["python", "main.py"]
+
+# Optional: install gunicorn for production server
+RUN pip install gunicorn
+
+# Copy your actual application here
+COPY . .
+
+CMD ["gunicorn", "main:app", "--bind", "0.0.0.0:9000"]
