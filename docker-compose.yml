@@ -2,6 +2,8 @@ version: '3.8'
 
 services:
   postgresql:
+    build:
+      context: ./docker/postgresql
     image: noletengine/authentik-postgresql:latest
     container_name: authentik_postgresql
     restart: unless-stopped
@@ -14,15 +16,17 @@ services:
     volumes:
       - database:/var/lib/postgresql/data
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authentik}
+      POSTGRES_USER: ${POSTGRES_USER:-authentik}
+      POSTGRES_DB: ${POSTGRES_DB:-authentik}
     env_file:
       - .env
     networks:
       - authentik
 
   redis:
+    build:
+      context: ./docker/redis
     image: noletengine/authentik-redis:latest
     container_name: authentik_redis
     command: --save 60 1 --loglevel warning
@@ -39,6 +43,8 @@ services:
       - authentik
 
   server:
+    build:
+      context: ./docker/server
     image: noletengine/authentik-server:latest
     container_name: authentik_server
     restart: unless-stopped
@@ -46,23 +52,23 @@ services:
     environment:
       AUTHENTIK_REDIS__HOST: redis
       AUTHENTIK_POSTGRESQL__HOST: postgresql
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
       AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
       AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
       AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
       AUTHENTIK_AVATARS: "initials"
-      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST}
-      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT}
-      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER}
-      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS}
-      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS}
-      AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL}
+      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-localhost}
+      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-}
+      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
+      AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL:-false}
       AUTHENTIK_EMAIL__TIMEOUT: 10
-      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM}
-      AUTHENTIK_COOKIE_DOMAIN: ${DOMAIN_NAME}
+      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@${DOMAIN_NAME:-localhost}}
+      AUTHENTIK_COOKIE_DOMAIN: ${DOMAIN_NAME:-localhost}
       AUTHENTIK_DEFAULT_USER_CHANGE_NAME: "false"
       AUTHENTIK_DEFAULT_USER_CHANGE_EMAIL: "false"
       AUTHENTIK_DEFAULT_USER_CHANGE_USERNAME: "false"
@@ -82,6 +88,8 @@ services:
       - authentik
 
   worker:
+    build:
+      context: ./docker/worker
     image: noletengine/authentik-worker:latest
     container_name: authentik_worker
     restart: unless-stopped
@@ -89,21 +97,21 @@ services:
     environment:
       AUTHENTIK_REDIS__HOST: redis
       AUTHENTIK_POSTGRESQL__HOST: postgresql
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
       AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
       AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
       AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
-      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST}
-      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT}
-      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER}
-      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS}
-      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS}
-      AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL}
+      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-localhost}
+      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-}
+      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
+      AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL:-false}
       AUTHENTIK_EMAIL__TIMEOUT: 10
-      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM}
+      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@${DOMAIN_NAME:-localhost}}
     user: root
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -119,6 +127,8 @@ services:
       - authentik
 
   nginx:
+    build:
+      context: ./docker/nginx
     image: noletengine/authentik-nginx:latest
     container_name: authentik_nginx
     restart: unless-stopped
@@ -126,11 +136,12 @@ services:
       - "192.168.0.2:80:80"
       - "192.168.0.2:443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
       - ./nginx/ssl.conf:/etc/nginx/ssl.conf
       - ./certs:/etc/nginx/certs
     environment:
-      DOMAIN_NAME: ${DOMAIN_NAME}
+      DOMAIN_NAME: ${DOMAIN_NAME:-localhost}
+      NGINX_ENVSUBST_TEMPLATE_SUFFIX: .template
     depends_on:
       - server
     networks:
@@ -138,7 +149,9 @@ services:
 
 volumes:
   database:
+    driver: local
   redis:
+    driver: local
 
 networks:
   authentik:
