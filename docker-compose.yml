@@ -79,8 +79,8 @@ services:
     env_file:
       - .env
     ports:
-      - "192.168.0.2:${AUTHENTIK_PORT_HTTP:-9000}:9000"
-      - "192.168.0.2:${AUTHENTIK_PORT_HTTPS:-9443}:9443"
+      - "${AUTHENTIK_PORT_HTTP:-9000}:9000"
+      - "${AUTHENTIK_PORT_HTTPS:-9443}:9443"
     depends_on:
       - postgresql
       - redis
@@ -133,8 +133,8 @@ services:
     container_name: authentik_nginx
     restart: unless-stopped
     ports:
-      - "192.168.0.2:80:80"
-      - "192.168.0.2:443:443"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
       - ./nginx/ssl.conf:/etc/nginx/ssl.conf
