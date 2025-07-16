@@ -1,0 +1,17 @@
+apiVersion: v2
+name: authentik
+description: A Helm chart for Authentik Identity Provider
+type: application
+version: 1.1.0
+appVersion: "2025.4.1"
+keywords:
+  - authentik
+  - identity
+  - sso
+  - authentication
+home: https://goauthentik.io/
+sources:
+  - https://github.com/goauthentik/authentik
+maintainers:
+  - name: Authentik Team
+    email: hello@goauthentik.io

@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "authentik.fullname" . }}-worker
+  labels:
+    {{- include "authentik.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.replicaCount.worker }}
+  selector:
+    matchLabels:
+      {{- include "authentik.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "authentik.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: authentik-worker
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}-worker:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["authentik"]
+          args: ["worker"]
+          env:
+            - name: AUTHENTIK_SECRET_KEY
+              value: {{ .Values.authentik.secretKey | quote }}
+            - name: AUTHENTIK_LOG_LEVEL
+              value: {{ .Values.authentik.logLevel | quote }}
+            - name: AUTHENTIK_REDIS__HOST
+              value: {{ include "authentik.redis.host" . }}
+            - name: AUTHENTIK_POSTGRESQL__HOST
+              value: {{ include "authentik.postgresql.host" . }}
+            - name: AUTHENTIK_POSTGRESQL__NAME
+              value: {{ .Values.postgresql.auth.database }}
+            - name: AUTHENTIK_POSTGRESQL__USER
+              value: {{ .Values.postgresql.auth.username }}
+            - name: AUTHENTIK_POSTGRESQL__PASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+            - name: AUTHENTIK_EMAIL__HOST
+              value: {{ .Values.smtp.host | quote }}
+            - name: AUTHENTIK_EMAIL__PORT
+              value: {{ .Values.smtp.port | quote }}
+            - name: AUTHENTIK_EMAIL__USERNAME
+              value: {{ .Values.smtp.username | quote }}
+            - name: AUTHENTIK_EMAIL__PASSWORD
+              value: {{ .Values.smtp.password | quote }}
+            - name: AUTHENTIK_EMAIL__USE_TLS
+              value: {{ .Values.smtp.useTLS | quote }}
+            - name: AUTHENTIK_EMAIL__FROM
+              value: {{ .Values.authentik.email.from | quote }}
+          resources:
+            {{- toYaml .Values.resources.worker | nindent 12 }}
+          volumeMounts:
+            - name: authentik-media
+              mountPath: /media
+            - name: authentik-templates
+              mountPath: /templates
+      volumes:
+        - name: authentik-media
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "authentik.fullname" . }}-media
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: authentik-templates
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

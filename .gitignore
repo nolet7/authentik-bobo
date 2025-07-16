@@ -1,0 +1,48 @@
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+
+# Kubernetes secrets
+kubeconfig
+*.kubeconfig
+
+# Helm
+charts/
+Chart.lock
+
+# Docker
+.dockerignore
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Certificates
+*.pem
+*.crt
+*.key
+certs/
+
+# Backup files
+*.backup
+*.bak
+
+# Media files (if running locally)
+media/
+custom-templates/

@@ -1,0 +1,147 @@
+version: '3.8'
+
+networks:
+  authentik:
+    driver: bridge
+
+volumes:
+  database:
+  redis:
+
+services:
+  postgresql:
+    image: postgres:16-alpine
+    container_name: authentik_postgresql
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-temp_build_pass}
+      POSTGRES_USER: ${POSTGRES_USER:-authentik}
+      POSTGRES_DB: ${POSTGRES_DB:-authentik}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    volumes:
+      - database:/var/lib/postgresql/data
+    networks:
+      - authentik
+
+  redis:
+    image: redis:alpine
+    container_name: authentik_redis
+    command: --save 60 1 --loglevel warning
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    volumes:
+      - redis:/data
+    networks:
+      - authentik
+
+  server:
+    image: ${CUSTOM_AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2025.4.1}
+    container_name: authentik_server
+    restart: unless-stopped
+    command: server
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    environment:
+      # Core Authentik Configuration
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-temp_build_key}
+      AUTHENTIK_LOG_LEVEL: ${AUTHENTIK_LOG_LEVEL:-info}
+      
+      # Database Configuration
+      AUTHENTIK_POSTGRESQL__HOST: ${POSTGRES_HOST:-postgresql}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-temp_build_pass}
+      
+      # Redis Configuration
+      AUTHENTIK_REDIS__HOST: ${REDIS_HOST:-redis}
+      
+      # Email Configuration
+      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-smtp.example.com}
+      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-noreply@example.com}
+      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-temp_smtp_pass}
+      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
+      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-"Authentik <noreply@authentik.srespace.tech>"}
+    volumes:
+      - ./media:/media
+      - ./custom-templates:/templates
+      - ./certs:/certs
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - authentik
+
+  worker:
+    image: ${CUSTOM_AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2025.4.1}
+    container_name: authentik_worker
+    restart: unless-stopped
+    command: worker
+    user: root
+    environment:
+      # Core Authentik Configuration
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-temp_build_key}
+      AUTHENTIK_LOG_LEVEL: ${AUTHENTIK_LOG_LEVEL:-info}
+      
+      # Database Configuration
+      AUTHENTIK_POSTGRESQL__HOST: ${POSTGRES_HOST:-postgresql}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-temp_build_pass}
+      
+      # Redis Configuration
+      AUTHENTIK_REDIS__HOST: ${REDIS_HOST:-redis}
+      
+      # Email Configuration
+      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-smtp.example.com}
+      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-noreply@example.com}
+      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-temp_smtp_pass}
+      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
+      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-"Authentik <noreply@authentik.srespace.tech>"}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./media:/media
+      - ./certs:/certs
+      - ./custom-templates:/templates
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - authentik
+
+  nginx:
+    image: ${CUSTOM_NGINX_IMAGE:-nginx:alpine}
+    container_name: authentik_nginx
+    restart: always
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME:-authentik.srespace.tech}
+      - AUTHENTIK_SERVER_HOST=server
+      - AUTHENTIK_SERVER_PORT=9000
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/letsencrypt/live/authentik.srespace.tech:/etc/nginx/certs:ro
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./nginx/ssl.conf:/etc/nginx/conf.d/ssl.conf:ro
+      - /etc/letsencrypt/ssl-dhparams.pem:/etc/nginx/certs/dhparam.pem:ro
+    depends_on:
+      - server
+    networks:
+      - authentik

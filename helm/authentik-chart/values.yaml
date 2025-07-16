@@ -1,0 +1,148 @@
+# Default values for authentik
+replicaCount:
+  server: 2
+  worker: 1
+
+image:
+  registry: docker.io/noletengine
+  repository: authentik
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Authentik configuration
+authentik:
+  secretKey: ""  # Will be set via Helm command
+  logLevel: info
+  errorReporting:
+    enabled: false
+  
+  # Email configuration
+  email:
+    host: ""
+    port: 587
+    username: ""
+    password: ""
+    useTLS: true
+    from: "authentik@example.com"
+
+# PostgreSQL configuration
+postgresql:
+  auth:
+    username: authentik
+    password: ""  # Will be set via Helm command
+    database: authentik
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+    storageClass: ""
+
+# Redis configuration
+redis:
+  persistence:
+    enabled: true
+    size: 5Gi
+    accessMode: ReadWriteOnce
+    storageClass: ""
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 9000
+  httpsPort: 9443
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hostname: authentik.srespace.tech
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    secretName: authentik-tls
+
+# Resource limits
+resources:
+  server:
+    requests:
+      memory: 512Mi
+      cpu: 500m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+  worker:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  postgresql:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  redis:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+
+# Node selection
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+# Monitoring
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# SMTP configuration
+smtp:
+  host: ""
+  port: 587
+  username: ""
+  password: ""
+  useTLS: true
