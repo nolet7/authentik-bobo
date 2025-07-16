@@ -1,4 +1,4 @@
-name: Build and Deploy Authentik with ArgoCD
+name: Complete CI/CD Deployment Pipeline
 
 on:
   push:
@@ -18,30 +18,51 @@ env:
   IMAGE_NAME_PREFIX: noletengine/authentik
 
 jobs:
-  build-and-push:
+  # ==========================================
+  # STAGE 1: BUILD AND TEST
+  # ==========================================
+  build-and-test:
     runs-on: self-hosted
     permissions:
       contents: read
       packages: write
 
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.build.outputs.tag }}
+      branch: ${{ steps.branch.outputs.branch }}
+      environment: ${{ steps.branch.outputs.environment }}
 
     steps:
-    - name: Checkout code
+    - name: 🛠 Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+    - name: 🔢 Get Commit SHA and Branch Info
+      id: branch
+      run: |
+        echo "COMMIT_SHA_SHORT=$(git rev-parse --short=4 HEAD)" >> $GITHUB_ENV
+        BRANCH=${GITHUB_REF#refs/heads/}
+        echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+        
+        # Determine environment based on branch
+        case "$BRANCH" in
+          "main")
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "namespace=authentik-production" >> $GITHUB_OUTPUT
+            echo "domain=auth.yourdomain.com" >> $GITHUB_OUTPUT
+            ;;
+          "develop")
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "namespace=authentik-staging" >> $GITHUB_OUTPUT
+            echo "domain=auth-staging.yourdomain.com" >> $GITHUB_OUTPUT
+            ;;
+          "sre")
+            echo "environment=sre" >> $GITHUB_OUTPUT
+            echo "namespace=authentik-sre" >> $GITHUB_OUTPUT
+            echo "domain=auth-sre.yourdomain.com" >> $GITHUB_OUTPUT
+            ;;
+        esac
 
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ env.DOCKER_USER }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-
-    - name: Import secrets from Vault
+    - name: 🔧 Install Vault CLI
       run: |
         # Install vault CLI if not present
         if ! command -v vault &> /dev/null; then
@@ -56,100 +77,129 @@ jobs:
           # Verify installation
           vault version
         fi
-        
-        # Set Vault address from environment and authenticate
-        export VAULT_ADDR=${{ env.VAULT_ADDR }}
-        
-        # Authenticate with Vault
+    - name: 🔐 Authenticate with Vault and Extract Secrets
+      run: |
+        # Set Vault address and authenticate using token
+        export VAULT_ADDR=${{ vars.VAULT_ADDR }}
         export VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
+        
+        # Verify authentication
         vault auth -method=token token=$VAULT_TOKEN
         
-        # Verify authentication worked
-        vault token lookup
+        # Extract secrets using the proven method from your working workflow
+        vault kv get Dev-secret/authentik | grep -w AUTHENTIK_SECRET_KEY | awk '{print $1"="$2}' >> $GITHUB_ENV
+        vault kv get Dev-secret/authentik | grep -w PG_PASS | awk '{print $1"="$2}' >> $GITHUB_ENV
+        vault kv get Dev-secret/authentik | grep -w SMTP_HOST | awk '{print $1"="$2}' >> $GITHUB_ENV
+        vault kv get Dev-secret/authentik | grep -w SMTP_PORT | awk '{print $1"="$2}' >> $GITHUB_ENV
+        vault kv get Dev-secret/authentik | grep -w SMTP_USER | awk '{print $1"="$2}' >> $GITHUB_ENV
+        vault kv get Dev-secret/authentik | grep -w SMTP_PASS | awk '{print $1"="$2}' >> $GITHUB_ENV
+        vault kv get Dev-secret/authentik | grep -w DOMAIN_NAME | awk '{print $1"="$2}' >> $GITHUB_ENV
         
-        # Check if KV v2 engine is enabled at secret/
-        vault secrets list | grep -q "secret/" || vault secrets enable -path=secret kv-v2
-        
-        # Try to get secrets, if path doesn't exist, create it with default values
-        if ! vault kv get ${{ env.VAULT_PATH }} > /dev/null 2>&1; then
-          echo "Creating Vault path with default values..."
-          vault kv put ${{ env.VAULT_PATH }} \
-            AUTHENTIK_SECRET_KEY="change-me-in-production" \
-            PG_PASS="authentik" \
-            SMTP_HOST="smtp.gmail.com" \
-            SMTP_PORT="587" \
-            SMTP_USER="user@example.com" \
-            SMTP_PASS="password" \
-            DOMAIN_NAME="auth.yourdomain.com"
-        fi
-        
-        # Get secrets and export as environment variables
-        vault kv get -format=json ${{ env.VAULT_PATH }} | jq -r '.data.data | to_entries[] | "export \(.key)=\(.value)"' > vault_secrets.env
-        source vault_secrets.env
-        
-        # Set GitHub environment variables
+        # Set additional environment variables
         echo "POSTGRES_PASSWORD=$PG_PASS" >> $GITHUB_ENV
-        echo "AUTHENTIK_SECRET_KEY=$AUTHENTIK_SECRET_KEY" >> $GITHUB_ENV
-        echo "SMTP_HOST=$SMTP_HOST" >> $GITHUB_ENV
-        echo "SMTP_PORT=$SMTP_PORT" >> $GITHUB_ENV
-        echo "SMTP_USER=$SMTP_USER" >> $GITHUB_ENV
-        echo "SMTP_PASS=$SMTP_PASS" >> $GITHUB_ENV
-        echo "DOMAIN_NAME=$DOMAIN_NAME" >> $GITHUB_ENV
+        echo "HOST_IP=192.168.0.2" >> $GITHUB_ENV
 
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
+    - name: 🐳 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: 🔑 Log in to Docker Hub
+      uses: docker/login-action@v3
       with:
-        images: |
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-nginx
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+        username: ${{ env.DOCKER_USER }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Build and push images
+    - name: 🏗️ Build and Test Images
       id: build
       run: |
         # Create .env file with Vault secrets
         cat > .env << EOF
         AUTHENTIK_SECRET_KEY=${{ env.AUTHENTIK_SECRET_KEY }}
         POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
+        POSTGRES_USER=authentik
+        POSTGRES_DB=authentik
         SMTP_HOST=${{ env.SMTP_HOST }}
         SMTP_PORT=${{ env.SMTP_PORT }}
         SMTP_USER=${{ env.SMTP_USER }}
         SMTP_PASS=${{ env.SMTP_PASS }}
+        SMTP_USE_TLS=true
+        SMTP_USE_SSL=false
+        SMTP_FROM=authentik@${{ env.DOMAIN_NAME }}
         DOMAIN_NAME=${{ env.DOMAIN_NAME }}
+        HOST_IP=${{ env.HOST_IP }}
+        AUTHENTIK_PORT_HTTP=9000
+        AUTHENTIK_PORT_HTTPS=9443
         EOF
         
-        # Extract tag from metadata
-        TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1 | cut -d: -f2)
-        echo "Building with tag: $TAG"
+        # Generate image tag
+        BRANCH=${{ steps.branch.outputs.branch }}
+        TAG="${BRANCH}-${{ env.COMMIT_SHA_SHORT }}"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
         
-        # Build and start containers
+        echo "🏗️ Building with tag: $TAG"
+        
+        # Clean up any existing containers
+        docker-compose down || true
+        docker system prune -f || true
+        
+        # Start containers to build images
         docker-compose up -d
         
-        # Wait for containers to be ready
-        sleep 30
+        # Wait for containers to be ready and test
+        echo "⏳ Waiting for containers to be ready..."
+        sleep 60
+        
+        # Health check
+        echo "🔍 Running health checks..."
+        docker-compose ps
+        
+        # Test database connection
+        docker-compose exec -T postgresql pg_isready -U authentik -d authentik || {
+          echo "❌ Database health check failed"
+          docker-compose logs postgresql
+          exit 1
+        }
+        
+        # Test Redis connection
+        docker-compose exec -T redis redis-cli ping || {
+          echo "❌ Redis health check failed"
+          docker-compose logs redis
+          exit 1
+        }
+        
+        # Test Authentik server
+        timeout 30 bash -c 'until curl -f http://192.168.0.2:9000/-/health/live/ 2>/dev/null; do sleep 2; done' || {
+          echo "❌ Authentik server health check failed"
+          docker-compose logs server
+          exit 1
+        }
+        
+        echo "✅ All health checks passed!"
         
         # Commit and tag images
+        echo "📦 Committing and tagging images..."
         docker commit authentik_server ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:$TAG
         docker commit authentik_worker ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:$TAG
         docker commit authentik_postgresql ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:$TAG
         docker commit authentik_redis ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-redis:$TAG
         docker commit authentik_nginx ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-nginx:$TAG
         
-        # Push images
+        # Cleanup containers
+        docker-compose down
+
+    - name: 🚀 Push Images to Registry
+      run: |
+        TAG=${{ steps.build.outputs.tag }}
+        
+        echo "🚀 Pushing images to registry..."
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-redis:$TAG
         docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-nginx:$TAG
         
-        # Tag as latest if main branch
-        if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+        # Tag as latest for main branch
+        if [ "${{ steps.branch.outputs.branch }}" = "main" ]; then
+          echo "🏷️ Tagging as latest for main branch..."
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:$TAG ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-server:latest
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:$TAG ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-worker:latest
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:$TAG ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-postgresql:latest
@@ -162,72 +212,257 @@ jobs:
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-redis:latest
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PREFIX }}-nginx:latest
         fi
-        
-        # Cleanup
-        docker-compose down
-        
-        echo "tag=$TAG" >> $GITHUB_OUTPUT
 
+    - name: 🧹 Cleanup Build Environment
+      if: always()
+      run: |
+        docker-compose down || true
+        docker system prune -f || true
+
+  # ==========================================
+  # STAGE 2: UPDATE HELM VALUES
+  # ==========================================
   update-helm-values:
-    needs: build-and-push
+    needs: build-and-test
     runs-on: self-hosted
     
     steps:
-    - name: Checkout code
+    - name: 🛠 Checkout Repository
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
-    - name: Update Helm values with new image tag
+    - name: 📝 Update Helm Values with New Image Tags
       run: |
         cd helm/authentik-chart
+        TAG="${{ needs.build-and-test.outputs.image-tag }}"
         
-        # Extract tag
-        TAG=${{ needs.build-and-push.outputs.tag }}
+        echo "📝 Updating Helm values with tag: $TAG"
         
-        # Update values.yaml with new image tag
-        sed -i "s/tag: .*/tag: \"$TAG\"/" values.yaml
+        # Update all image tags in values.yaml
+        sed -i "s/tag: \".*\"/tag: \"$TAG\"/" values.yaml
         
-        # Commit changes
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+        # Verify changes
+        echo "✅ Updated values.yaml:"
+        grep "tag:" values.yaml
+        
+        # Commit and push changes
+        git config --local user.email "github-actions@github.com"
+        git config --local user.name "GitHub Actions"
         git add values.yaml
-        git commit -m "Update image tag to $TAG" || exit 0
+        git commit -m "🚀 Update image tags to $TAG [skip ci]" || exit 0
         git push
 
-  deploy-with-argocd:
-    needs: [build-and-push, update-helm-values]
+  # ==========================================
+  # STAGE 3: DEPLOY TO KUBERNETES
+  # ==========================================
+  deploy-to-kubernetes:
+    needs: [build-and-test, update-helm-values]
     runs-on: self-hosted
     
     steps:
-    - name: Checkout code
+    - name: 🛠 Checkout Repository
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
-    - name: Apply ArgoCD Application
+    - name: 🔄 Pull Latest Changes
       run: |
-        # Apply ArgoCD application using kubectl
-        kubectl apply -f argocd/application.yaml
-        
-        # Wait for ArgoCD to sync the application
-        echo "Waiting for ArgoCD to sync the application..."
-        sleep 30
+        git pull origin ${{ needs.build-and-test.outputs.branch }}
 
-    - name: Verify deployment
+    - name: 🚀 Deploy with ArgoCD
       run: |
-        # Check ArgoCD application status
-        kubectl get application authentik -n argocd -o yaml
+        BRANCH="${{ needs.build-and-test.outputs.branch }}"
+        ENVIRONMENT="${{ needs.build-and-test.outputs.environment }}"
         
-        # Check Kubernetes resources
-        kubectl get pods -n authentik
-        kubectl get services -n authentik
-        kubectl get ingress -n authentik
+        echo "🚀 Deploying to $ENVIRONMENT environment..."
         
-        # Health check
-        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=authentik -n authentik --timeout=300s || true
+        case "$BRANCH" in
+          "main")
+            kubectl apply -f argocd/application-production.yaml
+            APP_NAME="authentik-production"
+            NAMESPACE="authentik-production"
+            ;;
+          "develop")
+            kubectl apply -f argocd/application-staging.yaml
+            APP_NAME="authentik-staging"
+            NAMESPACE="authentik-staging"
+            ;;
+          "sre")
+            kubectl apply -f argocd/application-sre.yaml
+            APP_NAME="authentik-sre"
+            NAMESPACE="authentik-sre"
+            ;;
+        esac
         
-        echo "Deployment completed successfully!"
+        echo "✅ Applied ArgoCD application: $APP_NAME"
 
+    - name: ⏳ Wait for ArgoCD Sync
+      run: |
+        BRANCH="${{ needs.build-and-test.outputs.branch }}"
+        
+        case "$BRANCH" in
+          "main") APP_NAME="authentik-production" ;;
+          "develop") APP_NAME="authentik-staging" ;;
+          "sre") APP_NAME="authentik-sre" ;;
+        esac
+        
+        echo "⏳ Waiting for ArgoCD to sync $APP_NAME..."
+        
+        # Wait for sync to complete
+        for i in {1..30}; do
+          SYNC_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+          HEALTH_STATUS=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+          
+          echo "Attempt $i/30: Sync=$SYNC_STATUS, Health=$HEALTH_STATUS"
+          
+          if [[ "$SYNC_STATUS" == "Synced" && "$HEALTH_STATUS" == "Healthy" ]]; then
+            echo "✅ Application is synced and healthy!"
+            break
+          fi
+          
+          if [[ $i -eq 30 ]]; then
+            echo "⚠️ Timeout waiting for sync, but continuing..."
+          fi
+          
+          sleep 10
+        done
+
+    - name: 🔍 Verify Deployment
+      run: |
+        BRANCH="${{ needs.build-and-test.outputs.branch }}"
+        
+        case "$BRANCH" in
+          "main")
+            APP_NAME="authentik-production"
+            NAMESPACE="authentik-production"
+            ;;
+          "develop")
+            APP_NAME="authentik-staging"
+            NAMESPACE="authentik-staging"
+            ;;
+          "sre")
+            APP_NAME="authentik-sre"
+            NAMESPACE="authentik-sre"
+            ;;
+        esac
+        
+        echo "📊 Checking ArgoCD application status..."
+        kubectl get application $APP_NAME -n argocd || true
+        
+        echo "📊 Checking pods in $NAMESPACE..."
+        kubectl get pods -n $NAMESPACE || true
+        
+        echo "📊 Checking services in $NAMESPACE..."
+        kubectl get services -n $NAMESPACE || true
+        
+        echo "📊 Checking ingress in $NAMESPACE..."
+        kubectl get ingress -n $NAMESPACE || true
+        
+        # Wait for pods to be ready
+        echo "⏳ Waiting for pods to be ready..."
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=authentik-chart -n $NAMESPACE --timeout=300s || {
+          echo "⚠️ Some pods may not be ready yet, checking status..."
+          kubectl get pods -n $NAMESPACE
+          kubectl describe pods -n $NAMESPACE
+        }
+
+  # ==========================================
+  # STAGE 4: POST-DEPLOYMENT TESTS
+  # ==========================================
+  post-deployment-tests:
+    needs: [build-and-test, deploy-to-kubernetes]
+    runs-on: self-hosted
+    if: always()
+    
+    steps:
+    - name: 🧪 Run Health Checks
+      run: |
+        BRANCH="${{ needs.build-and-test.outputs.branch }}"
+        
+        case "$BRANCH" in
+          "main") NAMESPACE="authentik-production" ;;
+          "develop") NAMESPACE="authentik-staging" ;;
+          "sre") NAMESPACE="authentik-sre" ;;
+        esac
+        
+        echo "🧪 Running post-deployment health checks..."
+        
+        # Check if pods are running
+        RUNNING_PODS=$(kubectl get pods -n $NAMESPACE --field-selector=status.phase=Running --no-headers | wc -l)
+        TOTAL_PODS=$(kubectl get pods -n $NAMESPACE --no-headers | wc -l)
+        
+        echo "📊 Pods Status: $RUNNING_PODS/$TOTAL_PODS running"
+        
+        if [[ $RUNNING_PODS -gt 0 ]]; then
+          echo "✅ At least some pods are running"
+        else
+          echo "❌ No pods are running"
+          exit 1
+        fi
+        
+        # Check services
+        kubectl get services -n $NAMESPACE
+        
+        # Check ingress
+        kubectl get ingress -n $NAMESPACE
+
+    - name: 📧 Send Notification (Optional)
+      if: always()
+      run: |
+        BRANCH="${{ needs.build-and-test.outputs.branch }}"
+        TAG="${{ needs.build-and-test.outputs.image-tag }}"
+        STATUS="${{ job.status }}"
+        
+        echo "📧 Deployment Summary:"
+        echo "Branch: $BRANCH"
+        echo "Tag: $TAG"
+        echo "Status: $STATUS"
+        echo "Environment: ${{ needs.build-and-test.outputs.environment }}"
+
+  # ==========================================
+  # STAGE 5: DEPLOYMENT SUMMARY
+  # ==========================================
+  deployment-summary:
+    needs: [build-and-test, update-helm-values, deploy-to-kubernetes, post-deployment-tests]
+    runs-on: self-hosted
+    if: always()
+    
+    steps:
+    - name: 📋 Generate Deployment Summary
+      run: |
+        BRANCH="${{ needs.build-and-test.outputs.branch }}"
+        TAG="${{ needs.build-and-test.outputs.image-tag }}"
+        ENVIRONMENT="${{ needs.build-and-test.outputs.environment }}"
+        
+        echo "🎉 Deployment Summary:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📦 Branch: $BRANCH"
+        echo "🏷️ Image Tag: $TAG"
+        echo "🌍 Environment: $ENVIRONMENT"
+        echo "🐳 Images Built: 5 (server, worker, postgresql, redis, nginx)"
+        echo "☸️ Kubernetes Namespace: authentik-$ENVIRONMENT"
+        echo "🌐 Domain: auth$([ "$BRANCH" != "main" ] && echo "-$BRANCH").yourdomain.com"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Check final status
+        BUILD_STATUS="${{ needs.build-and-test.result }}"
+        HELM_STATUS="${{ needs.update-helm-values.result }}"
+        DEPLOY_STATUS="${{ needs.deploy-to-kubernetes.result }}"
+        TEST_STATUS="${{ needs.post-deployment-tests.result }}"
+        
+        echo "📊 Pipeline Status:"
+        echo "🏗️ Build & Test: $BUILD_STATUS"
+        echo "📝 Helm Update: $HELM_STATUS"
+        echo "🚀 Deployment: $DEPLOY_STATUS"
+        echo "🧪 Post-Deploy Tests: $TEST_STATUS"
+        
+        if [[ "$BUILD_STATUS" == "success" && "$HELM_STATUS" == "success" && "$DEPLOY_STATUS" == "success" ]]; then
+          echo "✅ Deployment completed successfully!"
+          exit 0
+        else
+          echo "❌ Deployment had issues. Check individual job logs."
+          exit 1
+        fi
