@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
+const host = '192.168.0.2';
 
 // Serve static files
 app.use(express.static('public'));
@@ -164,10 +165,10 @@ app.get('/api/info', (req, res) => {
   });
 });
 
-app.listen(port, () => {
+app.listen(port, host, () => {
   console.log(`🔐 Authentik Deployment Server running on port ${port}`);
-  console.log(`📊 Health check: http://localhost:${port}/health`);
-  console.log(`🌐 Web interface: http://localhost:${port}`);
+  console.log(`📊 Health check: http://${host}:${port}/health`);
+  console.log(`🌐 Web interface: http://${host}:${port}`);
 });
 
 module.exports = app;
