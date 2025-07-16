@@ -12,7 +12,6 @@ on:
 
 env:
   VAULT_ADDR: http://192.168.0.116:8200
-  VAULT_PATH: secret/Dev-secret/authentik
   DOCKER_USER: noletengine
   REGISTRY: docker.io
   IMAGE_NAME_PREFIX: noletengine/authentik
@@ -34,7 +33,7 @@ jobs:
 
     steps:
     - name: 🛠 Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
 
     - name: 🔢 Get Commit SHA and Branch Info
       id: branch
@@ -64,49 +63,35 @@ jobs:
 
     - name: 🔧 Install Vault CLI
       run: |
-        # Install vault CLI if not present
-        if ! command -v vault &> /dev/null; then
-          # Download and install Vault binary directly
-          VAULT_VERSION="1.15.2"
-          wget -O vault.zip "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip"
-          unzip vault.zip
-          sudo mv vault /usr/local/bin/
-          sudo chmod +x /usr/local/bin/vault
-          rm vault.zip
-          
-          # Verify installation
-          vault version
-        fi
-    - name: 🔐 Authenticate with Vault and Extract Secrets
+        sudo curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+        sudo apt-get update && sudo apt-get install vault -y
+
+    - name: 🔐 Authenticate to Vault
+      run: vault login ${{ secrets.VAULT_TOKEN }}
+      env:
+        VAULT_ADDR: ${{ env.VAULT_ADDR }}
+
+    - name: 📦 Pull secrets from Vault
       run: |
-        # Set Vault address and authenticate using token
-        export VAULT_ADDR=${{ vars.VAULT_ADDR }}
-        export VAULT_TOKEN=${{ secrets.VAULT_TOKEN }}
-        
-        # Verify authentication
-        vault auth -method=token token=$VAULT_TOKEN
-        
-        # Extract secrets using the proven method from your working workflow
-        vault kv get Dev-secret/authentik | grep -w AUTHENTIK_SECRET_KEY | awk '{print $1"="$2}' >> $GITHUB_ENV
-        vault kv get Dev-secret/authentik | grep -w PG_PASS | awk '{print $1"="$2}' >> $GITHUB_ENV
-        vault kv get Dev-secret/authentik | grep -w SMTP_HOST | awk '{print $1"="$2}' >> $GITHUB_ENV
-        vault kv get Dev-secret/authentik | grep -w SMTP_PORT | awk '{print $1"="$2}' >> $GITHUB_ENV
-        vault kv get Dev-secret/authentik | grep -w SMTP_USER | awk '{print $1"="$2}' >> $GITHUB_ENV
-        vault kv get Dev-secret/authentik | grep -w SMTP_PASS | awk '{print $1"="$2}' >> $GITHUB_ENV
-        vault kv get Dev-secret/authentik | grep -w DOMAIN_NAME | awk '{print $1"="$2}' >> $GITHUB_ENV
+        echo "AUTHENTIK_SECRET_KEY=$(vault kv get -field=AUTHENTIK_SECRET_KEY secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "POSTGRES_USER=$(vault kv get -field=POSTGRES_USER secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "POSTGRES_PASSWORD=$(vault kv get -field=POSTGRES_PASSWORD secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "DATABASE_URL=$(vault kv get -field=DATABASE_URL secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_HOST=$(vault kv get -field=SMTP_HOST secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_PORT=$(vault kv get -field=SMTP_PORT secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_USER=$(vault kv get -field=SMTP_USER secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_PASS=$(vault kv get -field=SMTP_PASS secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "SMTP_USE_TLS=$(vault kv get -field=SMTP_USE_TLS secret/Dev-secret/authentik)" >> $GITHUB_ENV
+        echo "DOMAIN_NAME=$(vault kv get -field=DOMAIN_NAME secret/Dev-secret/authentik)" >> $GITHUB_ENV
         
         # Set additional environment variables
-        echo "POSTGRES_PASSWORD=$PG_PASS" >> $GITHUB_ENV
         echo "HOST_IP=192.168.0.2" >> $GITHUB_ENV
+      env:
+        VAULT_ADDR: ${{ env.VAULT_ADDR }}
 
-    - name: 🐳 Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: 🔑 Log in to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ env.DOCKER_USER }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+    - name: 🔑 Log in to DockerHub
+      run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
     - name: 🏗️ Build and Test Images
       id: build
@@ -115,13 +100,13 @@ jobs:
         cat > .env << EOF
         AUTHENTIK_SECRET_KEY=${{ env.AUTHENTIK_SECRET_KEY }}
         POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
-        POSTGRES_USER=authentik
+        POSTGRES_USER=${{ env.POSTGRES_USER }}
         POSTGRES_DB=authentik
         SMTP_HOST=${{ env.SMTP_HOST }}
         SMTP_PORT=${{ env.SMTP_PORT }}
         SMTP_USER=${{ env.SMTP_USER }}
         SMTP_PASS=${{ env.SMTP_PASS }}
-        SMTP_USE_TLS=true
+        SMTP_USE_TLS=${{ env.SMTP_USE_TLS }}
         SMTP_USE_SSL=false
         SMTP_FROM=authentik@${{ env.DOMAIN_NAME }}
         DOMAIN_NAME=${{ env.DOMAIN_NAME }}
@@ -153,7 +138,7 @@ jobs:
         docker-compose ps
         
         # Test database connection
-        docker-compose exec -T postgresql pg_isready -U authentik -d authentik || {
+        docker-compose exec -T postgresql pg_isready -U ${{ env.POSTGRES_USER }} -d authentik || {
           echo "❌ Database health check failed"
           docker-compose logs postgresql
           exit 1
@@ -228,7 +213,7 @@ jobs:
     
     steps:
     - name: 🛠 Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
@@ -263,7 +248,7 @@ jobs:
     
     steps:
     - name: 🛠 Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
@@ -408,19 +393,6 @@ jobs:
         
         # Check ingress
         kubectl get ingress -n $NAMESPACE
-
-    - name: 📧 Send Notification (Optional)
-      if: always()
-      run: |
-        BRANCH="${{ needs.build-and-test.outputs.branch }}"
-        TAG="${{ needs.build-and-test.outputs.image-tag }}"
-        STATUS="${{ job.status }}"
-        
-        echo "📧 Deployment Summary:"
-        echo "Branch: $BRANCH"
-        echo "Tag: $TAG"
-        echo "Status: $STATUS"
-        echo "Environment: ${{ needs.build-and-test.outputs.environment }}"
 
   # ==========================================
   # STAGE 5: DEPLOYMENT SUMMARY
