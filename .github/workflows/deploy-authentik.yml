@@ -1,4 +1,4 @@
-- name: Import secrets from Vault
+  name: Import secrets from Vault
   run: |
     set -e
 
