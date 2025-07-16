@@ -1,0 +1,213 @@
+# Authentik Helm Chart Values
+# Default values for authentik-chart
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# Image configuration
+image:
+  repository: noletengine/authentik-server
+  tag: "main-latest"
+  pullPolicy: IfNotPresent
+
+workerImage:
+  repository: noletengine/authentik-worker
+  tag: "main-latest"
+  pullPolicy: IfNotPresent
+
+nginxImage:
+  repository: noletengine/authentik-nginx
+  tag: "main-latest"
+  pullPolicy: IfNotPresent
+
+# Replica configuration
+replicaCount:
+  server: 2
+  worker: 2
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 9000
+  targetPort: 9000
+  annotations: {}
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: authentik.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: authentik-tls
+      hosts:
+        - authentik.yourdomain.com
+
+# Resource limits
+resources:
+  server:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  worker:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Node selector and affinity
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# PostgreSQL configuration
+postgresql:
+  enabled: true
+  image:
+    repository: noletengine/authentik-postgresql
+    tag: "main-latest"
+  auth:
+    postgresPassword: "authentik"
+    username: "authentik"
+    password: "authentik"
+    database: "authentik"
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+# Redis configuration
+redis:
+  enabled: true
+  image:
+    repository: noletengine/authentik-redis
+    tag: "main-latest"
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Authentik configuration
+authentik:
+  secretKey: "your-secret-key-here"
+  errorReporting:
+    enabled: false
+  disableUpdateCheck: true
+  disableStartupAnalytics: true
+  avatars: "initials"
+  
+  # Email configuration
+  email:
+    host: "smtp.gmail.com"
+    port: 587
+    username: ""
+    password: ""
+    useTLS: true
+    useSSL: false
+    timeout: 10
+    from: "authentik@yourdomain.com"
+  
+  # Domain configuration
+  cookieDomain: "yourdomain.com"
+  defaultUserChangeSettings:
+    name: false
+    email: false
+    username: false
+  gdprCompliance: true
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+# Environment variables
+env:
+  - name: AUTHENTIK_REDIS__HOST
+    value: "authentik-redis"
+  - name: AUTHENTIK_POSTGRESQL__HOST
+    value: "authentik-postgresql"
+  - name: AUTHENTIK_POSTGRESQL__USER
+    value: "authentik"
+  - name: AUTHENTIK_POSTGRESQL__NAME
+    value: "authentik"
+
+# Secret environment variables
+secretEnv:
+  - name: AUTHENTIK_SECRET_KEY
+    value: "your-secret-key-here"
+  - name: AUTHENTIK_POSTGRESQL__PASSWORD
+    value: "authentik"
+
+# Probes
+livenessProbe:
+  httpGet:
+    path: /-/health/live/
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /-/health/ready/
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3

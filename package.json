@@ -1,0 +1,34 @@
+{
+  "name": "authentik-deployment",
+  "version": "1.0.0",
+  "description": "Production-ready Authentik deployment with GitOps",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "authentik",
+    "identity",
+    "sso",
+    "kubernetes",
+    "helm",
+    "argocd",
+    "gitops"
+  ],
+  "author": "SRE Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nolet7/authentik-bobo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nolet7/authentik-bobo/issues"
+  },
+  "homepage": "https://github.com/nolet7/authentik-bobo#readme"
+}

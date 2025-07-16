@@ -1,0 +1,19 @@
+apiVersion: v2
+name: authentik-chart
+description: A Helm chart for Authentik Identity Provider
+type: application
+version: 0.1.0
+appVersion: "2024.2.2"
+keywords:
+  - authentik
+  - identity
+  - sso
+  - oauth
+  - saml
+home: https://goauthentik.io/
+sources:
+  - https://github.com/goauthentik/authentik
+maintainers:
+  - name: SRE Team
+    email: sre@company.com
+dependencies: []

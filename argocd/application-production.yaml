@@ -1,0 +1,60 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: authentik-production
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    environment: production
+    branch: main
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/nolet7/authentik-bobo.git
+    targetRevision: main
+    path: helm/authentik-chart
+    helm:
+      valueFiles:
+        - values.yaml
+      parameters:
+        - name: image.tag
+          value: "main-latest"
+        - name: workerImage.tag
+          value: "main-latest"
+        - name: nginxImage.tag
+          value: "main-latest"
+        - name: postgresql.image.tag
+          value: "main-latest"
+        - name: redis.image.tag
+          value: "main-latest"
+        - name: ingress.hosts[0].host
+          value: "auth.yourdomain.com"
+        - name: authentik.cookieDomain
+          value: "yourdomain.com"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: authentik-production
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+  info:
+    - name: 'Environment'
+      value: 'Production'
+    - name: 'Branch'
+      value: 'main'
+    - name: 'URL'
+      value: 'https://auth.yourdomain.com'

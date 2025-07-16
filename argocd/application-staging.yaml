@@ -1,0 +1,68 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: authentik-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    environment: staging
+    branch: develop
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/nolet7/authentik-bobo.git
+    targetRevision: develop
+    path: helm/authentik-chart
+    helm:
+      valueFiles:
+        - values.yaml
+      parameters:
+        - name: image.tag
+          value: "develop-latest"
+        - name: workerImage.tag
+          value: "develop-latest"
+        - name: nginxImage.tag
+          value: "develop-latest"
+        - name: postgresql.image.tag
+          value: "develop-latest"
+        - name: redis.image.tag
+          value: "develop-latest"
+        - name: ingress.hosts[0].host
+          value: "auth-staging.yourdomain.com"
+        - name: authentik.cookieDomain
+          value: "yourdomain.com"
+        - name: replicaCount.server
+          value: "1"
+        - name: replicaCount.worker
+          value: "1"
+        - name: resources.server.limits.cpu
+          value: "500m"
+        - name: resources.server.limits.memory
+          value: "1Gi"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: authentik-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+  info:
+    - name: 'Environment'
+      value: 'Staging'
+    - name: 'Branch'
+      value: 'develop'
+    - name: 'URL'
+      value: 'https://auth-staging.yourdomain.com'
