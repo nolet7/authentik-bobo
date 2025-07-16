@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgresql:
     build:
@@ -56,23 +54,13 @@ services:
       AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
       AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
-      AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
-      AUTHENTIK_AVATARS: "initials"
       AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-localhost}
       AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
       AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-}
       AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-}
       AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
       AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL:-false}
-      AUTHENTIK_EMAIL__TIMEOUT: 10
-      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@${DOMAIN_NAME:-localhost}}
-      AUTHENTIK_COOKIE_DOMAIN: ${DOMAIN_NAME:-localhost}
-      AUTHENTIK_DEFAULT_USER_CHANGE_NAME: "false"
-      AUTHENTIK_DEFAULT_USER_CHANGE_EMAIL: "false"
-      AUTHENTIK_DEFAULT_USER_CHANGE_USERNAME: "false"
-      AUTHENTIK_GDPR_COMPLIANCE: "true"
+      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@localhost}
     volumes:
       - ./media:/media
       - ./custom-templates:/templates
@@ -101,17 +89,13 @@ services:
       AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
       AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
-      AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
       AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-localhost}
       AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
       AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-}
       AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-}
       AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
       AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL:-false}
-      AUTHENTIK_EMAIL__TIMEOUT: 10
-      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@${DOMAIN_NAME:-localhost}}
+      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@localhost}
     user: root
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -149,9 +133,7 @@ services:
 
 volumes:
   database:
-    driver: local
   redis:
-    driver: local
 
 networks:
   authentik:
