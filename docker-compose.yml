@@ -1,140 +1,62 @@
+version: '3.8'
+
 services:
   postgresql:
     build:
       context: ./docker/postgresql
-    image: noletengine/authentik-postgresql:latest
     container_name: authentik_postgresql
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
-      start_period: 20s
-      interval: 30s
-      retries: 5
-      timeout: 5s
-    volumes:
-      - database:/var/lib/postgresql/data
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authentik}
-      POSTGRES_USER: ${POSTGRES_USER:-authentik}
-      POSTGRES_DB: ${POSTGRES_DB:-authentik}
-    env_file:
-      - .env
-    networks:
-      - authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: authentikpass
+      POSTGRES_DB: authentikdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
 
   redis:
     build:
       context: ./docker/redis
-    image: noletengine/authentik-redis:latest
     container_name: authentik_redis
-    command: --save 60 1 --loglevel warning
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-      start_period: 20s
-      interval: 30s
-      retries: 5
-      timeout: 3s
-    volumes:
-      - redis:/data
-    networks:
-      - authentik
+    ports:
+      - "6379:6379"
 
   server:
     build:
       context: ./docker/server
-    image: noletengine/authentik-server:latest
     container_name: authentik_server
-    restart: unless-stopped
-    command: server
-    environment:
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgresql
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-localhost}
-      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
-      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-}
-      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-}
-      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
-      AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL:-false}
-      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@localhost}
-    volumes:
-      - ./media:/media
-      - ./custom-templates:/templates
-    env_file:
-      - .env
-    ports:
-      - "${AUTHENTIK_PORT_HTTP:-9000}:9000"
-      - "${AUTHENTIK_PORT_HTTPS:-9443}:9443"
     depends_on:
       - postgresql
       - redis
-    networks:
-      - authentik
+    ports:
+      - "9000:9000"
+    environment:
+      DATABASE_URL: postgres://authentik:authentikpass@postgresql:5432/authentikdb
+      REDIS_URL: redis://redis:6379/0
 
   worker:
     build:
       context: ./docker/worker
-    image: noletengine/authentik-worker:latest
     container_name: authentik_worker
-    restart: unless-stopped
-    command: worker
-    environment:
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgresql
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-authentik}
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-localhost}
-      AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
-      AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-}
-      AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASS:-}
-      AUTHENTIK_EMAIL__USE_TLS: ${SMTP_USE_TLS:-true}
-      AUTHENTIK_EMAIL__USE_SSL: ${SMTP_USE_SSL:-false}
-      AUTHENTIK_EMAIL__FROM: ${SMTP_FROM:-authentik@localhost}
-    user: root
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./media:/media
-      - ./custom-templates:/templates
-      - ./certs:/certs
-    env_file:
-      - .env
     depends_on:
-      - postgresql
       - redis
-    networks:
-      - authentik
+      - postgresql
+    environment:
+      DATABASE_URL: postgres://authentik:authentikpass@postgresql:5432/authentikdb
+      REDIS_URL: redis://redis:6379/0
 
   nginx:
     build:
       context: ./docker/nginx
-    image: noletengine/authentik-nginx:latest
     container_name: authentik_nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template
-      - ./nginx/ssl.conf:/etc/nginx/ssl.conf
-      - ./certs:/etc/nginx/certs
-    environment:
-      DOMAIN_NAME: ${DOMAIN_NAME:-localhost}
-      NGINX_ENVSUBST_TEMPLATE_SUFFIX: .template
     depends_on:
       - server
-    networks:
-      - authentik
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
 
 volumes:
-  database:
-  redis:
-
-networks:
-  authentik:
-    driver: bridge
+  postgres_data:
