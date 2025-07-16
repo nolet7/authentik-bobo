@@ -5,6 +5,7 @@ on:
     branches: [ main, develop, sre ]
     paths:
       - 'helm/**'
+      - 'docker/**'
       - 'docker-compose.yml'
       - 'nginx/**'
       - '.github/workflows/**'
